@@ -282,7 +282,7 @@ cfg_rt! {
     pub use blocking::spawn_blocking;
 
     mod spawn;
-    pub use spawn::spawn;
+    pub use spawn::{spawn, spawn_with_deadline};
 
     cfg_rt_multi_thread! {
         pub use blocking::block_in_place;

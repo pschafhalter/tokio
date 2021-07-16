@@ -8,14 +8,15 @@ use crate::util::linked_list::{Link, LinkedList};
 use crate::util::{waker_ref, Wake, WakerRef};
 
 use std::cell::RefCell;
-use std::collections::VecDeque;
+use std::cmp::Ordering;
+use std::collections::BinaryHeap;
 use std::fmt;
 use std::future::Future;
 use std::ptr::NonNull;
 use std::sync::atomic::Ordering::{AcqRel, Acquire, Release};
 use std::sync::Arc;
 use std::task::Poll::{Pending, Ready};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 /// Executes tasks on the current thread
 pub(crate) struct BasicScheduler<P: Park> {
@@ -63,7 +64,7 @@ struct Tasks {
     /// Local run queue.
     ///
     /// Tasks notified from the current thread are pushed into this queue.
-    queue: VecDeque<task::Notified<Arc<Shared>>>,
+    queue: BinaryHeap<task::Notified<Arc<Shared>>>,
 }
 
 /// A remote scheduler entry.
@@ -77,6 +78,35 @@ enum Entry {
     Release(NonNull<task::Header>),
 }
 
+impl PartialEq for Entry {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other).is_eq()
+    }
+}
+
+impl Eq for Entry {
+    fn assert_receiver_is_total_eq(&self) {}
+}
+
+impl PartialOrd for Entry {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Entry {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        match (self, other) {
+            (Entry::Schedule(notified), Entry::Schedule(other_notified)) => {
+                notified.cmp(other_notified)
+            }
+            (Entry::Schedule(_), Entry::Release(_)) => Ordering::Less,
+            (Entry::Release(_), Entry::Schedule(_)) => Ordering::Greater,
+            (Entry::Release(_), Entry::Release(_)) => Ordering::Equal,
+        }
+    }
+}
+
 // Safety: Used correctly, the task header is "thread safe". Ultimately the task
 // is owned by the current thread executor, for which this instruction is being
 // sent.
@@ -85,7 +115,7 @@ unsafe impl Send for Entry {}
 /// Scheduler state shared between threads.
 struct Shared {
     /// Remote run queue. None if the `Runtime` has been dropped.
-    queue: Mutex<Option<VecDeque<Entry>>>,
+    queue: Mutex<Option<BinaryHeap<Entry>>>,
 
     /// Unpark the blocked thread.
     unpark: Box<dyn Unpark>,
@@ -124,7 +154,7 @@ impl<P: Park> BasicScheduler<P> {
 
         let spawner = Spawner {
             shared: Arc::new(Shared {
-                queue: Mutex::new(Some(VecDeque::with_capacity(INITIAL_CAPACITY))),
+                queue: Mutex::new(Some(BinaryHeap::with_capacity(INITIAL_CAPACITY))),
                 unpark: unpark as Box<dyn Unpark>,
                 woken: AtomicBool::new(false),
             }),
@@ -133,7 +163,7 @@ impl<P: Park> BasicScheduler<P> {
         let inner = Mutex::new(Some(Inner {
             tasks: Some(Tasks {
                 owned: LinkedList::new(),
-                queue: VecDeque::with_capacity(INITIAL_CAPACITY),
+                queue: BinaryHeap::with_capacity(INITIAL_CAPACITY),
             }),
             spawner: spawner.clone(),
             tick: 0,
@@ -221,20 +251,16 @@ impl<P: Park> Inner<P> {
                     scheduler.tick = scheduler.tick.wrapping_add(1);
 
                     let entry = if tick % REMOTE_FIRST_INTERVAL == 0 {
-                        scheduler.spawner.pop().or_else(|| {
-                            context
-                                .tasks
-                                .borrow_mut()
-                                .queue
-                                .pop_front()
-                                .map(Entry::Schedule)
-                        })
+                        scheduler
+                            .spawner
+                            .pop()
+                            .or_else(|| context.tasks.borrow_mut().queue.pop().map(Entry::Schedule))
                     } else {
                         context
                             .tasks
                             .borrow_mut()
                             .queue
-                            .pop_front()
+                            .pop()
                             .map(Entry::Schedule)
                             .or_else(|| scheduler.spawner.pop())
                     };
@@ -347,7 +373,7 @@ impl<P: Park> Drop for BasicScheduler<P> {
             }
 
             // Drain local queue
-            for task in context.tasks.borrow_mut().queue.drain(..) {
+            for task in context.tasks.borrow_mut().queue.drain() {
                 task.shutdown();
             }
 
@@ -390,19 +416,19 @@ impl<P: Park> fmt::Debug for BasicScheduler<P> {
 
 impl Spawner {
     /// Spawns a future onto the thread pool
-    pub(crate) fn spawn<F>(&self, future: F) -> JoinHandle<F::Output>
+    pub(crate) fn spawn<F>(&self, future: F, deadline: Option<SystemTime>) -> JoinHandle<F::Output>
     where
         F: crate::future::Future + Send + 'static,
         F::Output: Send + 'static,
     {
-        let (task, handle) = task::joinable(future);
+        let (task, handle) = task::joinable(future, deadline);
         self.shared.schedule(task);
         handle
     }
 
     fn pop(&self) -> Option<Entry> {
         match self.shared.queue.lock().as_mut() {
-            Some(queue) => queue.pop_front(),
+            Some(queue) => queue.pop(),
             None => None,
         }
     }
@@ -453,7 +479,7 @@ impl Schedule for Arc<Shared> {
                 // `Entry::Release` messages are ignored in the remote queue
                 // drain loop of `BasicScheduler`'s destructor.
                 if let Some(queue) = self.queue.lock().as_mut() {
-                    queue.push_back(Entry::Release(ptr));
+                    queue.push(Entry::Release(ptr));
                 }
 
                 self.unpark.unpark();
@@ -468,12 +494,12 @@ impl Schedule for Arc<Shared> {
     fn schedule(&self, task: task::Notified<Self>) {
         CURRENT.with(|maybe_cx| match maybe_cx {
             Some(cx) if Arc::ptr_eq(self, &cx.shared) => {
-                cx.tasks.borrow_mut().queue.push_back(task);
+                cx.tasks.borrow_mut().queue.push(task);
             }
             _ => {
                 let mut guard = self.queue.lock();
                 if let Some(queue) = guard.as_mut() {
-                    queue.push_back(Entry::Schedule(task));
+                    queue.push(Entry::Schedule(task));
                     drop(guard);
                     self.unpark.unpark();
                 } else {

@@ -31,13 +31,15 @@ use crate::util::linked_list;
 
 use std::marker::PhantomData;
 use std::ptr::NonNull;
+use std::time::{Duration, SystemTime};
 use std::{fmt, mem};
 
 /// An owned handle to the task, tracked by ref count
-#[repr(transparent)]
+// #[repr(transparent)]
 pub(crate) struct Task<S: 'static> {
     raw: RawTask,
     _p: PhantomData<S>,
+    deadline: Option<SystemTime>,
 }
 
 unsafe impl<S> Send for Task<S> {}
@@ -46,6 +48,35 @@ unsafe impl<S> Sync for Task<S> {}
 /// A task was notified
 #[repr(transparent)]
 pub(crate) struct Notified<S: 'static>(Task<S>);
+
+impl<S: 'static> PartialEq for Notified<S> {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other).is_eq()
+    }
+}
+
+impl<S: 'static> Eq for Notified<S> {
+    fn assert_receiver_is_total_eq(&self) {}
+}
+
+impl<S: 'static> PartialOrd for Notified<S> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<S: 'static> Ord for Notified<S> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        match (&self.0.deadline, &other.0.deadline) {
+            (None, None) => std::cmp::Ordering::Equal,
+            (None, Some(_)) => std::cmp::Ordering::Less,
+            (Some(_), None) => std::cmp::Ordering::Greater,
+            (Some(left_deadline), Some(right_deadline)) => {
+                left_deadline.cmp(right_deadline).reverse()
+            }
+        }
+    }
+}
 
 unsafe impl<S: Schedule> Send for Notified<S> {}
 unsafe impl<S: Schedule> Sync for Notified<S> {}
@@ -81,7 +112,7 @@ pub(crate) trait Schedule: Sync + Sized + 'static {
 
 cfg_rt! {
     /// Create a new task with an associated join handle
-    pub(crate) fn joinable<T, S>(task: T) -> (Notified<S>, JoinHandle<T::Output>)
+    pub(crate) fn joinable<T, S>(task: T, deadline: Option<SystemTime>) -> (Notified<S>, JoinHandle<T::Output>)
     where
         T: Future + Send + 'static,
         S: Schedule,
@@ -91,6 +122,7 @@ cfg_rt! {
         let task = Task {
             raw,
             _p: PhantomData,
+            deadline,
         };
 
         let join = JoinHandle::new(raw);
@@ -101,7 +133,7 @@ cfg_rt! {
 
 cfg_rt! {
     /// Create a new `!Send` task with an associated join handle
-    pub(crate) unsafe fn joinable_local<T, S>(task: T) -> (Notified<S>, JoinHandle<T::Output>)
+    pub(crate) unsafe fn joinable_local<T, S>(task: T, deadline: Option<SystemTime>) -> (Notified<S>, JoinHandle<T::Output>)
     where
         T: Future + 'static,
         S: Schedule,
@@ -111,6 +143,7 @@ cfg_rt! {
         let task = Task {
             raw,
             _p: PhantomData,
+            deadline,
         };
 
         let join = JoinHandle::new(raw);
@@ -124,6 +157,7 @@ impl<S: 'static> Task<S> {
         Task {
             raw: RawTask::from_raw(ptr),
             _p: PhantomData,
+            deadline: None,
         }
     }
 

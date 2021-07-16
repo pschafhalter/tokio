@@ -11,6 +11,7 @@ use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::Poll;
+use std::time::{Duration, SystemTime};
 
 use pin_project_lite::pin_project;
 
@@ -311,7 +312,7 @@ cfg_rt! {
 
             // Safety: Tasks are only polled and dropped from the thread that
             // spawns them.
-            let (task, handle) = unsafe { task::joinable_local(future) };
+            let (task, handle) = unsafe { task::joinable_local(future, None) };
             cx.tasks.borrow_mut().queue.push_back(task);
             handle
         })
@@ -389,7 +390,7 @@ impl LocalSet {
         F::Output: 'static,
     {
         let future = crate::util::trace::task(future, "local", None);
-        let (task, handle) = unsafe { task::joinable_local(future) };
+        let (task, handle) = unsafe { task::joinable_local(future, None) };
         self.context.tasks.borrow_mut().queue.push_back(task);
         self.context.shared.waker.wake();
         handle
