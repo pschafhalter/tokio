@@ -1,6 +1,5 @@
 //! Run-queue structures to support a work-stealing scheduler
 
-use crate::loom::cell::UnsafeCell;
 use crate::loom::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicUsize};
 use crate::loom::sync::{Arc, Mutex};
 use crate::runtime::task;
@@ -71,7 +70,7 @@ impl<T> Local<T> {
         !self.inner.is_empty()
     }
 
-    pub(super) fn push_back(&mut self, mut task: task::Notified<T>, inject: &Inject<T>)
+    pub(super) fn push_back(&mut self, task: task::Notified<T>, inject: &Inject<T>)
     where
         T: crate::runtime::task::Schedule,
     {
@@ -95,8 +94,15 @@ impl<T> Steal<T> {
 
     /// Steals half the tasks from self and place them into `dst`.
     pub(super) fn steal_into(&self, dst: &mut Local<T>) -> Option<task::Notified<T>> {
-        let mut src_tasks = self.0.tasks.lock();
-        let mut dst_tasks = dst.inner.tasks.lock();
+        // println!("steal into");
+        // Avoids deadlock.
+        let (mut src_tasks, mut dst_tasks) = loop {
+            let s = self.0.tasks.lock();
+            if let Some(d) = dst.inner.tasks.try_lock() {
+                break (s, d);
+            }
+            drop(s);
+        };
 
         let num_to_transfer = src_tasks.len() / 2;
         if dst_tasks.len() + num_to_transfer > LOCAL_QUEUE_CAPACITY {
