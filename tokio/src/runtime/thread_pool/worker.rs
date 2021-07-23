@@ -12,7 +12,7 @@ use crate::runtime;
 use crate::runtime::enter::EnterContext;
 use crate::runtime::park::{Parker, Unparker};
 use crate::runtime::thread_pool::{AtomicCell, Idle};
-use crate::runtime::{queue, task};
+use crate::runtime::{priority_queue, task};
 use crate::util::linked_list::{Link, LinkedList};
 use crate::util::FastRand;
 
@@ -44,7 +44,7 @@ struct Core {
     lifo_slot: Option<Notified>,
 
     /// The worker-local run queue.
-    run_queue: queue::Local<Arc<Worker>>,
+    run_queue: priority_queue::Local<Arc<Worker>>,
 
     /// True if the worker is currently searching for more work. Searching
     /// involves attempting to steal from other workers.
@@ -73,7 +73,7 @@ pub(super) struct Shared {
     remotes: Box<[Remote]>,
 
     /// Submit work to the scheduler while **not** currently on a worker thread.
-    inject: queue::Inject<Arc<Worker>>,
+    inject: priority_queue::Inject<Arc<Worker>>,
 
     /// Coordinates idle workers
     idle: Idle,
@@ -89,7 +89,7 @@ pub(super) struct Shared {
 /// Used to communicate with a worker from other threads.
 struct Remote {
     /// Steal tasks from this worker.
-    steal: queue::Steal<Arc<Worker>>,
+    steal: priority_queue::Steal<Arc<Worker>>,
 
     /// Transfers tasks to be released. Any worker pushes tasks, only the owning
     /// worker pops.
@@ -131,7 +131,7 @@ pub(super) fn create(size: usize, park: Parker) -> (Arc<Shared>, Launch) {
 
     // Create the local queues
     for _ in 0..size {
-        let (steal, run_queue) = queue::local();
+        let (steal, run_queue) = priority_queue::local();
 
         let park = park.clone();
         let unpark = park.unpark();
@@ -156,7 +156,7 @@ pub(super) fn create(size: usize, park: Parker) -> (Arc<Shared>, Launch) {
 
     let shared = Arc::new(Shared {
         remotes: remotes.into_boxed_slice(),
-        inject: queue::Inject::new(),
+        inject: priority_queue::Inject::new(),
         idle: Idle::new(size),
         shutdown_cores: Mutex::new(vec![]),
     });
@@ -604,7 +604,7 @@ impl Core {
 
 impl Worker {
     /// Returns a reference to the scheduler's injection queue
-    fn inject(&self) -> &queue::Inject<Arc<Worker>> {
+    fn inject(&self) -> &priority_queue::Inject<Arc<Worker>> {
         &self.shared.inject
     }
 

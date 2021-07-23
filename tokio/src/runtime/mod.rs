@@ -211,6 +211,7 @@ cfg_rt_multi_thread! {
 
 cfg_rt_multi_thread! {
     mod queue;
+    mod priority_queue;
 
     pub(crate) mod thread_pool;
     use self::thread_pool::ThreadPool;
