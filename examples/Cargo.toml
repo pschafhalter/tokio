@@ -95,3 +95,7 @@ path = "named-pipe-multi-client.rs"
 [[example]]
 name = "deadlines"
 path = "deadlines.rs"
+
+[[example]]
+name = "spawn-throughput"
+path = "spawn_throughput.rs"
