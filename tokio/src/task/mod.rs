@@ -282,7 +282,7 @@ cfg_rt! {
     pub use blocking::spawn_blocking;
 
     mod spawn;
-    pub use spawn::{spawn, spawn_with_deadline};
+    pub use spawn::{spawn, spawn_with_spec};
 
     cfg_rt_multi_thread! {
         pub use blocking::block_in_place;
@@ -296,6 +296,9 @@ cfg_rt! {
 
     mod task_local;
     pub use task_local::LocalKey;
+
+    mod task_spec;
+    pub use task_spec::TaskSpec;
 
     mod unconstrained;
     pub use unconstrained::{unconstrained, Unconstrained};

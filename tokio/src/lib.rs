@@ -395,7 +395,7 @@ cfg_not_sync! {
 
 pub mod task;
 cfg_rt! {
-    pub use task::{spawn, spawn_with_deadline};
+    pub use task::{spawn, spawn_with_spec, TaskSpec};
 }
 
 cfg_time! {

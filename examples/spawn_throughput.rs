@@ -18,7 +18,13 @@ async fn time_tasks(num_tasks: usize) -> Duration {
     for _ in 0..num_tasks {
         let deadline_secs: u8 = rng.gen();
         let deadline = SystemTime::now() + Duration::from_secs(deadline_secs as u64);
-        handles.push(tokio::spawn_with_deadline(noop(), deadline));
+        handles.push(tokio::spawn_with_spec(
+            noop(),
+            tokio::TaskSpec {
+                priority: 0,
+                deadline: Some(deadline),
+            },
+        ));
         // handles.push(tokio::spawn(noop()));
     }
 
@@ -35,7 +41,7 @@ async fn async_main() {
     // Warmup
     time_tasks(100).await;
     // Experiment
-    let num_tasks = 1000;
+    let num_tasks = 100_000;
     let duration = time_tasks(num_tasks).await;
 
     let throughput = (num_tasks as f64) / duration.as_secs_f64();

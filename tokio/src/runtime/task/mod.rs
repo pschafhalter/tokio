@@ -28,10 +28,10 @@ cfg_rt_multi_thread! {
 
 use crate::future::Future;
 use crate::util::linked_list;
+use crate::TaskSpec;
 
 use std::marker::PhantomData;
 use std::ptr::NonNull;
-use std::time::{Duration, SystemTime};
 use std::{fmt, mem};
 
 /// An owned handle to the task, tracked by ref count
@@ -39,7 +39,7 @@ use std::{fmt, mem};
 pub(crate) struct Task<S: 'static> {
     raw: RawTask,
     _p: PhantomData<S>,
-    deadline: Option<SystemTime>,
+    spec: TaskSpec,
 }
 
 unsafe impl<S> Send for Task<S> {}
@@ -67,14 +67,7 @@ impl<S: 'static> PartialOrd for Notified<S> {
 
 impl<S: 'static> Ord for Notified<S> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        match (&self.0.deadline, &other.0.deadline) {
-            (None, None) => std::cmp::Ordering::Equal,
-            (None, Some(_)) => std::cmp::Ordering::Less,
-            (Some(_), None) => std::cmp::Ordering::Greater,
-            (Some(left_deadline), Some(right_deadline)) => {
-                left_deadline.cmp(right_deadline).reverse()
-            }
-        }
+        self.0.spec.cmp(&other.0.spec)
     }
 }
 
@@ -112,7 +105,7 @@ pub(crate) trait Schedule: Sync + Sized + 'static {
 
 cfg_rt! {
     /// Create a new task with an associated join handle
-    pub(crate) fn joinable<T, S>(task: T, deadline: Option<SystemTime>) -> (Notified<S>, JoinHandle<T::Output>)
+    pub(crate) fn joinable<T, S>(task: T, spec: TaskSpec) -> (Notified<S>, JoinHandle<T::Output>)
     where
         T: Future + Send + 'static,
         S: Schedule,
@@ -122,7 +115,7 @@ cfg_rt! {
         let task = Task {
             raw,
             _p: PhantomData,
-            deadline,
+            spec,
         };
 
         let join = JoinHandle::new(raw);
@@ -133,7 +126,7 @@ cfg_rt! {
 
 cfg_rt! {
     /// Create a new `!Send` task with an associated join handle
-    pub(crate) unsafe fn joinable_local<T, S>(task: T, deadline: Option<SystemTime>) -> (Notified<S>, JoinHandle<T::Output>)
+    pub(crate) unsafe fn joinable_local<T, S>(task: T, spec: TaskSpec) -> (Notified<S>, JoinHandle<T::Output>)
     where
         T: Future + 'static,
         S: Schedule,
@@ -143,7 +136,7 @@ cfg_rt! {
         let task = Task {
             raw,
             _p: PhantomData,
-            deadline,
+            spec,
         };
 
         let join = JoinHandle::new(raw);
@@ -157,7 +150,7 @@ impl<S: 'static> Task<S> {
         Task {
             raw: RawTask::from_raw(ptr),
             _p: PhantomData,
-            deadline: None,
+            spec: TaskSpec::default(),
         }
     }
 

@@ -2,9 +2,9 @@ use crate::runtime::blocking::task::BlockingTask;
 use crate::runtime::task::{self, JoinHandle};
 use crate::runtime::{blocking, context, driver, Spawner};
 use crate::util::error::CONTEXT_MISSING_ERROR;
+use crate::TaskSpec;
 
 use std::future::Future;
-use std::time::{Duration, SystemTime};
 use std::{error, fmt};
 
 /// Handle to the runtime.
@@ -214,7 +214,7 @@ impl Handle {
         #[cfg(not(all(tokio_unstable, feature = "tracing")))]
         let _ = name;
 
-        let (task, handle) = task::joinable(fut, None);
+        let (task, handle) = task::joinable(fut, TaskSpec::default());
         let _ = self.blocking_spawner.spawn(task, &self);
         handle
     }

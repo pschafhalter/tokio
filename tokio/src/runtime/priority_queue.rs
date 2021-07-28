@@ -1,14 +1,11 @@
 //! Run-queue structures to support a work-stealing scheduler
 
-use crate::loom::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicUsize};
+use crate::loom::sync::atomic::AtomicBool;
 use crate::loom::sync::{Arc, Mutex};
 use crate::runtime::task;
 
 use std::collections::BinaryHeap;
-use std::marker::PhantomData;
-use std::mem::MaybeUninit;
-use std::ptr::{self, NonNull};
-use std::sync::atomic::Ordering::{AcqRel, Acquire, Relaxed, Release};
+use std::sync::atomic::Ordering::{Acquire, Release};
 
 /// Producer handle. May only be used from a single thread.
 pub(super) struct Local<T: 'static> {

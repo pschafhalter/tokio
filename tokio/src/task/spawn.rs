@@ -1,7 +1,6 @@
-use crate::{task::JoinHandle, util::error::CONTEXT_MISSING_ERROR};
+use crate::{task::JoinHandle, util::error::CONTEXT_MISSING_ERROR, TaskSpec};
 
 use std::future::Future;
-use std::time::SystemTime;
 
 cfg_rt! {
     /// Spawns a new asynchronous task, returning a
@@ -144,12 +143,12 @@ cfg_rt! {
 
     /// Spawn a task with a deadline.
     #[cfg_attr(tokio_track_caller, track_caller)]
-    pub fn spawn_with_deadline<T>(future: T, deadline: SystemTime) -> JoinHandle<T::Output>
+    pub fn spawn_with_spec<T>(future: T, spec: TaskSpec) -> JoinHandle<T::Output>
     where
     T: Future + Send + 'static,
     T::Output: Send + 'static, {
         let spawn_handle = crate::runtime::context::spawn_handle().expect(CONTEXT_MISSING_ERROR);
         let task = crate::util::trace::task(future, "task", None);
-        spawn_handle.spawn_with_deadline(task, deadline)
+        spawn_handle.spawn_with_spec(task, spec)
     }
 }

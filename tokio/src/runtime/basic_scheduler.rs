@@ -6,6 +6,7 @@ use crate::runtime::task::{self, JoinHandle, Schedule, Task};
 use crate::sync::notify::Notify;
 use crate::util::linked_list::{Link, LinkedList};
 use crate::util::{waker_ref, Wake, WakerRef};
+use crate::TaskSpec;
 
 use std::cell::RefCell;
 use std::cmp::Ordering;
@@ -16,7 +17,7 @@ use std::ptr::NonNull;
 use std::sync::atomic::Ordering::{AcqRel, Acquire, Release};
 use std::sync::Arc;
 use std::task::Poll::{Pending, Ready};
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 /// Executes tasks on the current thread
 pub(crate) struct BasicScheduler<P: Park> {
@@ -416,12 +417,12 @@ impl<P: Park> fmt::Debug for BasicScheduler<P> {
 
 impl Spawner {
     /// Spawns a future onto the thread pool
-    pub(crate) fn spawn<F>(&self, future: F, deadline: Option<SystemTime>) -> JoinHandle<F::Output>
+    pub(crate) fn spawn<F>(&self, future: F, spec: TaskSpec) -> JoinHandle<F::Output>
     where
         F: crate::future::Future + Send + 'static,
         F::Output: Send + 'static,
     {
-        let (task, handle) = task::joinable(future, deadline);
+        let (task, handle) = task::joinable(future, spec);
         self.shared.schedule(task);
         handle
     }

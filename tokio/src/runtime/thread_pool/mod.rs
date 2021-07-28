@@ -14,10 +14,10 @@ pub(crate) use worker::block_in_place;
 use crate::loom::sync::Arc;
 use crate::runtime::task::{self, JoinHandle};
 use crate::runtime::Parker;
+use crate::TaskSpec;
 
 use std::fmt;
 use std::future::Future;
-use std::time::SystemTime;
 
 /// Work-stealing based thread pool for executing futures.
 pub(crate) struct ThreadPool {
@@ -89,12 +89,12 @@ impl Drop for ThreadPool {
 
 impl Spawner {
     /// Spawns a future onto the thread pool
-    pub(crate) fn spawn<F>(&self, future: F, deadline: Option<SystemTime>) -> JoinHandle<F::Output>
+    pub(crate) fn spawn<F>(&self, future: F, spec: TaskSpec) -> JoinHandle<F::Output>
     where
         F: crate::future::Future + Send + 'static,
         F::Output: Send + 'static,
     {
-        let (task, handle) = task::joinable(future, deadline);
+        let (task, handle) = task::joinable(future, spec);
 
         if let Err(task) = self.shared.schedule(task, false) {
             // The newly spawned task could not be scheduled because the runtime
